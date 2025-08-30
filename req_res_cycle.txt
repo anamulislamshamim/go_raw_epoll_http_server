@@ -1,0 +1,105 @@
+# 🔹 Flow: Client → Server (Go HTTP/TCP server)
+
+1. **Client initiates connection**
+
+   * Client calls `connect()` to server IP\:PORT.
+   * TCP 3-way handshake happens (SYN, SYN-ACK, ACK).
+   * Kernel on the server creates a **socket** and assigns a **file descriptor (FD)**.
+
+2. **Server socket setup (Go side)**
+
+   * In Go:
+
+     ```go
+     ln, _ := net.Listen("tcp", ":8080")
+     for {
+         conn, _ := ln.Accept()
+         go handleConnection(conn)
+     }
+     ```
+   * `net.Listen()` → syscall `socket()`, `bind()`, `listen()`.
+   * Server kernel maintains a **listen queue** of pending connections.
+
+3. **Accepting a connection**
+
+   * `ln.Accept()` in Go calls syscall `accept()`.
+   * Kernel removes a connection from the listen queue → returns a **new FD** for that connection.
+   * Each connection gets its own FD.
+
+4. **Go runtime & goroutines**
+
+   * Go runtime uses an **event loop** (like epoll/kqueue/iocp depending on OS).
+   * When a connection FD is ready (data available), Go runtime wakes the goroutine waiting on it.
+   * `go handleConnection(conn)` spawns a new **goroutine** (lightweight thread managed by Go runtime).
+   * Goroutine reads request data (`conn.Read()` → syscall `read(fd, …)`).
+
+5. **Kernel interaction during read/write**
+
+   * `read(fd)`:
+
+     * If data in kernel socket buffer → copy to user space buffer.
+     * If empty → goroutine is parked, Go runtime uses epoll to wait.
+   * `write(fd)`:
+
+     * Data copied from user space → kernel socket buffer → NIC (Network Interface Card) → client.
+
+6. **Go Scheduler (M\:N model)**
+
+   * Goroutines are not OS threads.
+   * Go runtime schedules thousands of goroutines (G) onto a smaller pool of OS threads (M).
+   * The scheduler uses **P (processor contexts)** to manage execution.
+   * When goroutine blocks on I/O, Go runtime parks it and uses `epoll` to resume later.
+
+---
+
+# 🔹 Diagram
+
+Here’s a simplified diagram of what happens:
+
+```
+ Client (Browser/curl)             Server (Go app)
+ ----------------------            ---------------------------
+ |  send request     |             | net.Listen() -> socket() |
+ |------------------>| TCP SYN     |                         |
+ |                   |-----------> | Kernel: accept queue     |
+ |                   |<----------- | TCP SYN-ACK              |
+ |                   |------------>| TCP ACK                  |
+ |                   |             | FD created for conn      |
+ |                   |             | ln.Accept() -> accept()  |
+ |                   |             | returns FD to Go runtime |
+ |                   |             |                          |
+ |                   |             | Go runtime registers FD  |
+ |                   |             | with epoll (non-blocking)|
+ |                   |             |                          |
+ |                   |             | goroutine spawned        |
+ |                   |             | go handleConnection()    |
+ |                   |             |   conn.Read() -> read(fd)|
+ |                   |             |   (kernel copies data)   |
+ |                   |             |                          |
+ | <--- Response ----|             | conn.Write() -> write(fd)|
+ |                   |             | kernel → NIC → network   |
+ ----------------------            ---------------------------
+```
+
+---
+
+# 🔹 Key Interactions
+
+* **File Descriptor (FD)**: Kernel object representing the socket.
+* **Kernel**: Handles TCP state machine, buffers, epoll event readiness.
+* **Go Runtime**:
+
+  * Uses epoll to multiplex many sockets.
+  * Wakes goroutines when their FD is ready.
+  * Maps goroutines (G) onto OS threads (M) with scheduler (P).
+* **Goroutine**: Lightweight function handling a single request concurrently.
+
+---
+
+👉 So in short:
+
+* Kernel manages sockets & FDs.
+* Go runtime manages goroutines & uses epoll to avoid blocking threads.
+* Each request is handled in a separate goroutine (concurrent, cheap).
+
+---
