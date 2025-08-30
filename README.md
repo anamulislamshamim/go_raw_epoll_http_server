@@ -1,0 +1,3 @@
+Here’s a tiny Linux-only raw epoll HTTP server in Go that uses just the standard library (syscall) and no external packages. <br>
+It creates the socket, sets it non-blocking, registers it with epoll, accepts connections, reads the <br> request, and writes a minimal HTTP response—so you can see how FDs, sockets, epoll, kernel readiness notifications, <br>
+and goroutines (well, here we stay single-threaded for clarity) fit together.
