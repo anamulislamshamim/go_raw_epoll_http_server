@@ -57,7 +57,3 @@ Of course 👍 Let me distill the big code into **concise execution steps** so y
 * We `read` requests from client FDs.
 * We `write` back an HTTP response.
 * All coordinated by **epoll** + file descriptors.
-
----
-
-Do you want me to also add a **parallel "what happens in kernel" column** for each step (like FD in kernel table, socket buffer usage, epoll readiness flags)?
